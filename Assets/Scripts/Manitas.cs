@@ -9,6 +9,13 @@ public class Manitas3D : MonoBehaviour
     public GameObject panelInstrucciones; 
     public float velocidadFade = 1.5f;
 
+    [Header("Sistema de Vidas")]
+    public GameObject[] corazonesJ1; 
+    public GameObject[] corazonesJ2; 
+    private int vidasJ1 = 3;
+    private int vidasJ2 = 3;
+    private bool partidaDefinitivaTerminada = false;
+
     [Header("Cámara Cinematográfica")]
     public Animator animCamara; 
 
@@ -19,6 +26,20 @@ public class Manitas3D : MonoBehaviour
     [Header("Personajes (Ragdoll)")]
     public ControladorRagdoll ragdollJ1;
     public ControladorRagdoll ragdollJ2;
+
+    [Header("Efectos Visuales")]
+    public ParticleSystem particulasGolpeJ1; 
+    public ParticleSystem particulasGolpeJ2; 
+
+    [Header("Audio")]
+    public AudioSource fuenteMusica; 
+    public AudioSource fuenteEfectos; 
+    
+    public AudioClip musicaFondo;
+    public AudioClip musicaVictoria;
+    public AudioClip sonidoGolpe;
+    public AudioClip sonidoFalsoInicio;
+    public AudioClip sonidoEsquivar;
 
     private float tiempoEspera;
     private bool esperandoAlerta;
@@ -32,33 +53,43 @@ public class Manitas3D : MonoBehaviour
     {
         textoEstado.text = ""; 
         if (panelInstrucciones != null) panelInstrucciones.SetActive(true);
-        
-        // Iniciamos la cuenta regresiva para quitar el panel
+        OcultarCorazones(true);
         StartCoroutine(RutinaInstrucciones());
     }
 
-    // --- NUEVA RUTINA PARA EL PANEL ---
+    void OcultarCorazones(bool ocultar)
+    {
+        foreach (GameObject corazon in corazonesJ1) if (corazon != null) corazon.SetActive(!ocultar);
+        foreach (GameObject corazon in corazonesJ2) if (corazon != null) corazon.SetActive(!ocultar);
+    }
+
     IEnumerator RutinaInstrucciones()
     {
-        // Esperamos exactamente 2 segundos
-        yield return new WaitForSeconds(2f);
-        
-        // Apagamos el panel y arrancamos el juego
+        yield return new WaitForSeconds(3f);
         if (panelInstrucciones != null) panelInstrucciones.SetActive(false);
+        OcultarCorazones(false);
         juegoEmpezado = true;
+        
+        if (fuenteMusica != null && musicaFondo != null)
+        {
+            fuenteMusica.clip = musicaFondo;
+            fuenteMusica.loop = true; 
+            fuenteMusica.Play();
+        }
+
         StartCoroutine(SecuenciaDeInicio());
     }
 
     void Update()
     {
-        // Si el juego no ha empezado (estamos en los 3 segundos del panel), ignoramos el teclado
         if (!juegoEmpezado) return; 
 
         if (juegoTerminado)
         {
             if (Input.GetKeyDown(KeyCode.Space) && !secuenciaEnCurso)
             {
-                StartCoroutine(SecuenciaDeInicio());
+                if (partidaDefinitivaTerminada) ReiniciarPartidaCompleta();
+                else StartCoroutine(SecuenciaDeInicio());
             }
             return;
         }
@@ -80,13 +111,15 @@ public class Manitas3D : MonoBehaviour
 
             if (teclaPresionada != 0)
             {
+                int perdedor = teclaPresionada;
                 int ganador = (teclaPresionada == 1) ? 2 : 1;
                 
+                if (fuenteEfectos != null && sonidoFalsoInicio != null) fuenteEfectos.PlayOneShot(sonidoFalsoInicio);
+
                 if (teclaPresionada == 1) animJ1.SetTrigger("FalsoInicio");
                 else animJ2.SetTrigger("FalsoInicio");
 
-                // Texto sin la "Ó"
-                StartCoroutine(RutinaImpacto(ganador, "¡J" + teclaPresionada + " SE ADELANTO!\nGANA JUGADOR " + ganador));
+                StartCoroutine(RutinaImpacto(ganador, perdedor, "¡J" + perdedor + " SE ADELANTO!", true));
             }
 
             if (tiempoEspera <= 0f && esperandoAlerta)
@@ -102,13 +135,17 @@ public class Manitas3D : MonoBehaviour
         {
             if (teclaPresionada == atacanteActual)
             {
+                int perdedor = (atacanteActual == 1) ? 2 : 1;
+
                 if (teclaPresionada == 1) animJ1.SetTrigger("Ataque");
                 else animJ2.SetTrigger("Ataque");
                 
-                StartCoroutine(RutinaImpacto(teclaPresionada, "¡GANA JUGADOR " + teclaPresionada + "!"));
+                StartCoroutine(RutinaImpacto(atacanteActual, perdedor, "¡PUNTO PARA JUGADOR " + atacanteActual + "!", false));
             }
             else
             {
+                if (fuenteEfectos != null && sonidoEsquivar != null) fuenteEfectos.PlayOneShot(sonidoEsquivar);
+
                 if (teclaPresionada == 1) animJ1.SetTrigger("Esquive");
                 else animJ2.SetTrigger("Esquive");
                 
@@ -134,10 +171,7 @@ public class Manitas3D : MonoBehaviour
         ragdollJ1.ApagarRagdoll();
         ragdollJ2.ApagarRagdoll();
 
-        if (animCamara != null) 
-        {
-            animCamara.Play("PaneoInicio", -1, 0f); 
-        }
+        if (animCamara != null) animCamara.Play("PaneoInicio", -1, 0f); 
 
         yield return new WaitForSeconds(1.5f);
 
@@ -152,21 +186,47 @@ public class Manitas3D : MonoBehaviour
         secuenciaEnCurso = false;
     }
 
-    IEnumerator RutinaImpacto(int ganador, string mensaje)
+    IEnumerator RutinaImpacto(int ganador, int perdedor, string mensajeRonda, bool esFalsoInicio)
     {
         juegoTerminado = true;
         esperandoAlerta = false;
         secuenciaEnCurso = true; 
         
-        textoEstado.text = mensaje + "\n<size=40%>(Presiona ESPACIO para reiniciar)</size>";
+        RestarVida(perdedor);
+
+        yield return new WaitForSeconds(0.25f);
+
+        if (!esFalsoInicio && fuenteEfectos != null && sonidoGolpe != null) 
+        {
+            fuenteEfectos.PlayOneShot(sonidoGolpe);
+        }
+
+        if (partidaDefinitivaTerminada)
+        {
+            textoEstado.text = "¡JUGADOR " + ganador + " GANA EL JUEGO!\n<size=40%>(Presiona ESPACIO para nueva partida)</size>";
+            
+            if (fuenteMusica != null) fuenteMusica.Stop();
+            if (fuenteEfectos != null && musicaVictoria != null) fuenteEfectos.PlayOneShot(musicaVictoria);
+        }
+        else
+        {
+            textoEstado.text = mensajeRonda + "\n<size=40%>(Presiona ESPACIO para siguiente ronda)</size>";
+        }
+
         Color colorFinal = textoEstado.color;
         colorFinal.a = 1f;
         textoEstado.color = colorFinal;
 
-        yield return new WaitForSeconds(0.25f);
-
-        if (ganador == 1) ragdollJ2.VolarPorLosAires(-ragdollJ2.transform.forward);
-        else if (ganador == 2) ragdollJ1.VolarPorLosAires(-ragdollJ1.transform.forward);
+        if (ganador == 1) 
+        {
+            if (particulasGolpeJ2 != null) particulasGolpeJ2.Play();
+            ragdollJ2.VolarPorLosAires(-ragdollJ2.transform.forward);
+        }
+        else if (ganador == 2) 
+        {
+            if (particulasGolpeJ1 != null) particulasGolpeJ1.Play();
+            ragdollJ1.VolarPorLosAires(-ragdollJ1.transform.forward);
+        }
 
         secuenciaEnCurso = false; 
     }
@@ -177,7 +237,6 @@ public class Manitas3D : MonoBehaviour
         esperandoAlerta = false;
         secuenciaEnCurso = true; 
         
-        // Texto sin la "Ó"
         textoEstado.text = "¡ESQUIVO!\n<size=60%>Cambio de roles</size>";
         Color colorFinal = textoEstado.color;
         colorFinal.a = 1f;
@@ -190,5 +249,44 @@ public class Manitas3D : MonoBehaviour
 
         textoEstado.text += "\n<size=40%>(Presiona ESPACIO para siguiente ronda)</size>";
         secuenciaEnCurso = false; 
+    }
+
+    void RestarVida(int perdedor)
+    {
+        if (perdedor == 1)
+        {
+            vidasJ1--;
+            if (vidasJ1 >= 0 && corazonesJ1[vidasJ1] != null) corazonesJ1[vidasJ1].SetActive(false); 
+            if (vidasJ1 <= 0) partidaDefinitivaTerminada = true;
+        }
+        else
+        {
+            vidasJ2--;
+            if (vidasJ2 >= 0 && corazonesJ2[vidasJ2] != null) corazonesJ2[vidasJ2].SetActive(false);
+            if (vidasJ2 <= 0) partidaDefinitivaTerminada = true;
+        }
+    }
+
+    void ReiniciarPartidaCompleta()
+    {
+        vidasJ1 = 3;
+        vidasJ2 = 3;
+        OcultarCorazones(false); 
+        partidaDefinitivaTerminada = false;
+        pendienteCambioRoles = false;
+        
+        // ¡LA SOLUCIÓN ESTÁ AQUÍ! Callamos el parlante de efectos (canción de victoria)
+        if (fuenteEfectos != null)
+        {
+            fuenteEfectos.Stop();
+        }
+        
+        if (fuenteMusica != null && musicaFondo != null)
+        {
+            fuenteMusica.clip = musicaFondo;
+            fuenteMusica.Play();
+        }
+
+        StartCoroutine(SecuenciaDeInicio());
     }
 }
